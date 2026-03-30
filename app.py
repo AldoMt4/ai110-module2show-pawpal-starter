@@ -23,9 +23,11 @@ st.caption("Your daily pet care planning assistant")
 # Owner once — subsequent reruns find it already in the vault and skip.
 # ---------------------------------------------------------------------------
 if "owner" not in st.session_state:
-    st.session_state.owner = None      # will hold the Owner instance
+    st.session_state.owner = None           # holds the Owner instance
 if "last_plan" not in st.session_state:
-    st.session_state.last_plan = []    # will hold the most recent scheduled tasks
+    st.session_state.last_plan = []         # holds the most recent scheduled tasks
+if "last_scheduler" not in st.session_state:
+    st.session_state.last_scheduler = None  # holds Scheduler for complete_task()
 
 # ---------------------------------------------------------------------------
 # Section 1 — Owner setup
@@ -36,12 +38,20 @@ with st.form("owner_form"):
     # Pre-fill from existing session data if the owner already exists
     existing = st.session_state.owner
     owner_name = st.text_input("Your name", value=existing.name if existing else "Jordan")
-    available_minutes = st.number_input(
-        "Minutes available for pet care today",
-        min_value=10, max_value=480,
-        value=existing.available_minutes if existing else 90,
-        step=10,
-    )
+    col_a, col_b = st.columns(2)
+    with col_a:
+        available_minutes = st.number_input(
+            "Minutes available today",
+            min_value=10, max_value=480,
+            value=existing.available_minutes if existing else 90,
+            step=10,
+        )
+    with col_b:
+        day_start = st.text_input(
+            "Day start time (HH:MM)",
+            value=existing.day_start if existing else "08:00",
+            help="When your pet care day begins, e.g. 08:00",
+        )
     saved = st.form_submit_button("Save owner")
 
 if saved:
@@ -50,16 +60,18 @@ if saved:
         st.session_state.owner = Owner(
             name=owner_name,
             available_minutes=int(available_minutes),
+            day_start=day_start,
         )
     else:
         # Subsequent save: update the existing Owner in-place so pets are kept
         st.session_state.owner.name = owner_name
         st.session_state.owner.available_minutes = int(available_minutes)
-    st.success(f"Owner saved: **{owner_name}** ({available_minutes} min budget)")
+        st.session_state.owner.day_start = day_start
+    st.success(f"Owner saved: **{owner_name}** ({available_minutes} min, starts {day_start})")
 
 if st.session_state.owner:
     o = st.session_state.owner
-    st.caption(f"Active owner: **{o.name}** — {o.available_minutes} min budget — {len(o.pets)} pet(s)")
+    st.caption(f"Active owner: **{o.name}** — {o.available_minutes} min budget, starts {o.day_start} — {len(o.pets)} pet(s)")
 
 st.divider()
 
@@ -196,12 +208,16 @@ else:
     col_b.metric("Total task time", f"{total_task_min} min")
 
     if st.button("Generate schedule", type="primary"):
-        scheduler = Scheduler(owner=owner, date=date.today().isoformat())
-        st.session_state.last_plan = scheduler.build_plan()   # store in vault
+        _sched = Scheduler(owner=owner, date=date.today().isoformat())
+        _sched.build_plan()
+        _sched.assign_times()                              # assign HH:MM start times
+        st.session_state.last_plan = _sched.scheduled_tasks
+        st.session_state.last_scheduler = _sched          # store for complete_task()
 
     # Show the plan whenever one exists (persists across reruns)
     if st.session_state.last_plan:
         plan = st.session_state.last_plan
+        sched: Scheduler = st.session_state.last_scheduler
         used = sum(t.duration_minutes for t in plan)
         skipped = [t for t in all_tasks if not t.is_scheduled]
 
@@ -210,11 +226,16 @@ else:
             f"— {used} / {owner.available_minutes} min used"
         )
 
-        # --- Today's plan table ---
+        # --- Conflict warnings (Step 4) ---
+        for w in sched.detect_conflicts():
+            st.warning(w)
+
+        # --- Today's plan table (now includes start time column) ---
         st.subheader("Today's Plan")
         plan_rows = [
             {
                 "#": i,
+                "Time": t.start_time or "—",
                 "Task": t.title,
                 "Priority": t.priority,
                 "Duration (min)": t.duration_minutes,
@@ -231,9 +252,7 @@ else:
                 for t in skipped:
                     st.write(f"- **{t.title}** — {t.duration_minutes} min ({t.priority} priority)")
 
-        # --- Mark tasks complete ---
-        # task.mark_complete() mutates the Task object that lives inside
-        # owner.pets[*].tasks, so the change persists in session_state
+        # --- Mark tasks complete (Step 3: uses complete_task for recurrence) ---
         st.subheader("Mark Tasks Complete")
         any_pending = any(not t.completed for t in plan)
         if not any_pending:
@@ -245,5 +264,15 @@ else:
                     st.write(f"✓ ~~{t.title}~~")
                 else:
                     if st.button(f"Mark done: {t.title}", key=f"done_{id(t)}"):
-                        t.mark_complete()   # calls Task.mark_complete() from pawpal_system
-                        st.rerun()          # refresh so the table and button update
+                        pet = sched._find_pet(t)
+                        if pet:
+                            # complete_task marks done + enqueues next recurrence
+                            next_task = sched.complete_task(t, pet)
+                            if next_task:
+                                st.toast(
+                                    f"Next '{t.title}' scheduled for {next_task.due_date}",
+                                    icon="🔁",
+                                )
+                        else:
+                            t.mark_complete()
+                        st.rerun()
