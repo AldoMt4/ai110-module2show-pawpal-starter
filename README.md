@@ -41,3 +41,36 @@ pip install -r requirements.txt
 5. Add tests to verify key behaviors.
 6. Connect your logic to the Streamlit UI in `app.py`.
 7. Refine UML so it matches what you actually built.
+
+---
+
+## Testing PawPal+
+
+### Run the test suite
+
+```bash
+# activate your virtual environment first
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m pytest tests/ -v
+```
+
+### What the tests cover
+
+31 tests across all four core classes and the new scheduling algorithms:
+
+| Category | Tests | Description |
+|---|---|---|
+| Time helpers | 2 | `_parse_time` / `_format_time` round-trip accuracy |
+| Task | 6 | `mark_complete`, idempotency, `next_occurrence` for daily/weekly/as-needed, field preservation |
+| Pet | 2 | `add_task` count, `get_tasks_by_priority` ordering |
+| Owner | 2 | `add_pet` registration, `get_available_time` |
+| Scheduler — build_plan | 3 | Budget cap, priority-first selection, zero-fit case |
+| **Sorting correctness** | 4 | `assign_times` sets correct start/sequential times; `sort_by_time` returns chronological order; tasks without times sort last |
+| **Filtering** | 4 | Filter by pet name, by completion status, by both combined, and with no filter |
+| **Recurrence logic** | 3 | `complete_task` marks done, adds next-day task for daily frequency, adds no task for as-needed |
+| **Conflict detection** | 3 | Overlapping tasks flagged, sequential tasks clean, adjacent (touching) tasks not flagged |
+| Helper | 2 | `_find_pet` returns correct pet or None |
+
+### Confidence level
+
+⭐⭐⭐⭐⭐ (5/5) — All 31 tests pass. Edge cases covered: zero-budget schedules, as-needed recurrence, adjacent-but-not-overlapping time slots, and tasks with no start time assigned.
