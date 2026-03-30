@@ -4,8 +4,17 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+I designed four classes for PawPal+:
+
+- **Task** (dataclass): Represents a single pet care activity. Holds `title`, `duration_minutes`, `priority` (low/medium/high), `category`, and `is_scheduled`. Using a dataclass keeps it lightweight and easy to compare or sort. Its sole responsibility is to describe *what* needs to be done and how costly it is in time.
+
+- **Pet** (dataclass): Represents one of the owner's pets. Holds `name`, `species`, `age`, and a list of `Task` objects. Responsible for storing its own task list and for sorting those tasks by priority when asked. A Pet knows about its care needs but has no scheduling authority.
+
+- **Owner**: Represents the human user. Holds `name`, `available_minutes` for the day, a list of `preferences` (e.g., "prefer morning walks"), and a list of `Pet` objects. Responsible for tracking the owner's time budget and registering pets. Owner does not build plans — it only describes the constraints.
+
+- **Scheduler**: Orchestrates the daily plan. Takes an `Owner` and a `date`, collects tasks from all pets, selects tasks that fit within `available_minutes` (highest priority first), and can explain the plan in plain language. This is the only class with scheduling authority.
+
+Relationships: Owner has 0..* Pets (one-to-many aggregation); Pet has 0..* Tasks (one-to-many composition); Scheduler depends on Owner (uses-relationship) and produces/marks Tasks as scheduled.
 
 **b. Design changes**
 
