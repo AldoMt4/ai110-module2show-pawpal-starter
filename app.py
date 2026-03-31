@@ -226,11 +226,21 @@ else:
             f"— {used} / {owner.available_minutes} min used"
         )
 
-        # --- Conflict warnings (Step 4) ---
-        for w in sched.detect_conflicts():
-            st.warning(w)
+        # --- Conflict warnings — displayed prominently so they are hard to miss ---
+        conflicts = sched.detect_conflicts()
+        if conflicts:
+            st.error(f"⚠️ {len(conflicts)} schedule conflict(s) detected — review before starting!")
+            for w in conflicts:
+                st.warning(f"**{w}**  \n_Tip: adjust task durations or regenerate the schedule._")
 
-        # --- Today's plan table (now includes start time column) ---
+        # --- Time budget progress bar ---
+        done_count = sum(1 for t in plan if t.completed)
+        st.progress(
+            done_count / len(plan),
+            text=f"Daily progress: {done_count} / {len(plan)} tasks completed",
+        )
+
+        # --- Today's plan table (sorted by start time, includes Time column) ---
         st.subheader("Today's Plan")
         plan_rows = [
             {
@@ -242,9 +252,29 @@ else:
                 "Category": t.category,
                 "Status": "✓ Done" if t.completed else "Pending",
             }
-            for i, t in enumerate(plan, start=1)
+            for i, t in enumerate(sched.sort_by_time(), start=1)
         ]
         st.table(plan_rows)
+
+        # --- Filter view — exposes filter_tasks() to the user ---
+        with st.expander("Filter tasks"):
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                filter_pet = st.selectbox("By pet", ["All"] + [p.name for p in owner.pets])
+            with col_f2:
+                filter_status = st.selectbox("By status", ["All", "Pending", "Done"])
+            fp = None if filter_pet == "All" else filter_pet
+            fc = None if filter_status == "All" else (filter_status == "Done")
+            filtered = sched.filter_tasks(pet_name=fp, completed=fc)
+            if filtered:
+                st.table([
+                    {"Task": t.title, "Priority": t.priority,
+                     "Duration": f"{t.duration_minutes} min",
+                     "Frequency": t.frequency, "Done": "✓" if t.completed else ""}
+                    for t in filtered
+                ])
+            else:
+                st.info("No tasks match that filter.")
 
         # --- Skipped tasks ---
         if skipped:
@@ -252,12 +282,12 @@ else:
                 for t in skipped:
                     st.write(f"- **{t.title}** — {t.duration_minutes} min ({t.priority} priority)")
 
-        # --- Mark tasks complete (Step 3: uses complete_task for recurrence) ---
+        # --- Mark tasks complete (uses complete_task for automatic recurrence) ---
         st.subheader("Mark Tasks Complete")
         any_pending = any(not t.completed for t in plan)
         if not any_pending:
             st.balloons()
-            st.success("All tasks for today are done!")
+            st.success("All tasks for today are done — great job!")
         else:
             for t in plan:
                 if t.completed:
